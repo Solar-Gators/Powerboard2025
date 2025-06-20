@@ -22,6 +22,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+#include "INA226.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -47,6 +49,10 @@ CAN_HandleTypeDef hcan1;
 I2C_HandleTypeDef hi2c2;
 
 /* USER CODE BEGIN PV */
+
+uint32_t last_toggle_time_heartbeat = 0;
+INA226_t ina_buck;
+INA226_t ina_supp;
 
 /* USER CODE END PV */
 
@@ -99,6 +105,15 @@ int main(void)
   MX_I2C2_Init();
   /* USER CODE BEGIN 2 */
 
+  HAL_CAN_Start(&hcan1);
+
+  if (INA226_Initialize(&ina_buck, &hi2c2, INA226_I2C_ADDR_BUCK, 10, 20) != HAL_OK) {
+    Error_Handler();
+  }
+  if (INA226_Initialize(&ina_supp, &hi2c2, INA226_I2C_ADDR_SUPP, 10, 20) != HAL_OK) {
+      Error_Handler();
+  }
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -108,6 +123,41 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+    // heartbeat every 500ms
+    // read adc every 500ms
+    // read i2c every 500ms
+    // send can message every 500ms
+
+    uint32_t current_time = HAL_GetTick();
+    // every 500ms
+    if (current_time - last_toggle_time_heartbeat >= 500) {
+      last_toggle_time_heartbeat = current_time;
+
+      // toggle led
+      HAL_GPIO_TogglePin(OK_LED_GPIO_Port, OK_LED_Pin);
+
+      // read adc
+      uint16_t adc = 0;
+      HAL_ADC_Start(&hadc1);
+      if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) {
+        adc = HAL_ADC_GetValue(&hadc1);
+      }
+      HAL_ADC_Stop(&hadc1);
+
+      // read i2c
+      ina_buck.current = getCurrentAmp(&ina_buck);
+      ina_buck.power   = getPowerWatt(&ina_buck);
+
+      ina_supp.current = getCurrentAmp(&ina_supp);
+      ina_supp.power   = getPowerWatt(&ina_supp);
+
+      // format in form to be sent over CAN
+
+      // Send CAN message
+
+    }
+
   }
   /* USER CODE END 3 */
 }
