@@ -107,10 +107,10 @@ int main(void)
 
   HAL_CAN_Start(&hcan1);
 
-  if (INA226_Initialize(&ina_buck, &hi2c2, INA226_I2C_ADDR_BUCK, 10, 20) != HAL_OK) {
+  if (INA226_Initialize(&ina_buck, INA226_I2C_ADDR_BUCK, &hi2c2, 10, 20) != HAL_OK) {
     Error_Handler();
   }
-  if (INA226_Initialize(&ina_supp, &hi2c2, INA226_I2C_ADDR_SUPP, 10, 20) != HAL_OK) {
+  if (INA226_Initialize(&ina_supp, INA226_I2C_ADDR_SUPP, &hi2c2, 10, 20) != HAL_OK) {
       Error_Handler();
   }
 
@@ -140,10 +140,12 @@ int main(void)
       // read adc
       uint16_t adc = 0;
       HAL_ADC_Start(&hadc1);
-      if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) {
+      if (HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK) {
         adc = HAL_ADC_GetValue(&hadc1);
       }
       HAL_ADC_Stop(&hadc1);
+      float voltage = (float)adc * 3.3f / 4095.0f; // assuming 12-bit ADC and 3.3V reference
+      uint32_t mVoltage = (uint32_t)(voltage * 1000); // convert to mV
 
       // read i2c
       ina_buck.current = getCurrentAmp(&ina_buck);
@@ -153,8 +155,25 @@ int main(void)
       ina_supp.power   = getPowerWatt(&ina_supp);
 
       // format in form to be sent over CAN
+      CAN_TxHeaderTypeDef tx_header;
+      tx_header.StdId = 3; // example ID
+      tx_header.ExtId = 0x00;
+      tx_header.RTR = CAN_RTR_DATA;
+      tx_header.IDE = CAN_ID_STD;
+      tx_header.DLC = 8; // Data Length Code, number of bytes to send
+      uint8_t tx_data[8] = {0};
+
+      tx_data[0] = 3;
+      tx_data[1] = (mVoltage) & 0xFF;
+      tx_data[2] = (mVoltage >> 8) & 0xFF;
+      tx_data[3] = (mVoltage >> 16) & 0xFF;
+      tx_data[4] = (mVoltage >> 24) & 0xFF;
 
       // Send CAN message
+      uint32_t tx_mailbox;
+      if (HAL_CAN_AddTxMessage(&hcan1, &tx_header, tx_data, &tx_mailbox) != HAL_OK) {
+        Error_Handler();
+      }
 
     }
 
