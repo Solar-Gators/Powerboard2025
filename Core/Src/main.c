@@ -51,8 +51,16 @@ I2C_HandleTypeDef hi2c2;
 /* USER CODE BEGIN PV */
 
 uint32_t last_toggle_time_heartbeat = 0;
+uint32_t last_toggle_time_adc = 0;
 INA226_t ina_buck;
 INA226_t ina_supp;
+
+CAN_TxHeaderTypeDef tx_header;
+uint8_t tx_data[8] = {0};
+
+uint32_t supp_mVolts_reads[20] = {0};
+uint8_t supp_mVolts_index = 0;
+
 
 /* USER CODE END PV */
 
@@ -121,7 +129,11 @@ int main(void)
   HAL_CAN_Start(&hcan1);
   HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
 
-
+  tx_header.IDE = CAN_ID_STD;
+  tx_header.StdId = 3; // example ID
+  tx_header.RTR = CAN_RTR_DATA;
+  tx_header.DLC = 8; // Data Length Code, number of bytes to send
+  tx_data[0] = 3;
 
 
   if (INA226_Initialize(&ina_buck, INA226_I2C_ADDR_BUCK, &hi2c2, 10, 20) != HAL_OK) {
@@ -148,12 +160,10 @@ int main(void)
     // send can message every 500ms
 
     uint32_t current_time = HAL_GetTick();
-    // every 500ms
-    if (current_time - last_toggle_time_heartbeat >= 500) {
-      last_toggle_time_heartbeat = current_time;
 
-      // toggle led
-      HAL_GPIO_TogglePin(OK_LED_GPIO_Port, OK_LED_Pin);
+    // every 50 ms
+    if (current_time - last_toggle_time_adc >= 50) {
+      last_toggle_time_adc = current_time;
 
       // read adc
       uint16_t adc = 0;
@@ -162,8 +172,18 @@ int main(void)
         adc = HAL_ADC_GetValue(&hadc1);
       }
       HAL_ADC_Stop(&hadc1);
-      float voltage = (float)adc * 3.3f / 4095.0f * 6.4f; // * 6.426f is from voltage divider/tolerance stuff idk its just guestimated to be right if that makes sense
+      float voltage = (float)adc * 3.3f / 4095.0f * 6.426f; // * 6.426f is from voltage divider/tolerance stuff idk its just guestimated to be right if that makes sense
       uint32_t mVoltage = (uint32_t)(voltage * 1000); // convert to mV
+
+      supp_mVolts_reads[supp_mVolts_index++] = mVoltage;
+    }
+
+    // every 1000ms
+    if (current_time - last_toggle_time_heartbeat >= 1000) {
+      last_toggle_time_heartbeat = current_time;
+
+      // toggle led
+      HAL_GPIO_TogglePin(OK_LED_GPIO_Port, OK_LED_Pin);
 
       // read i2c
       ina_buck.current = getCurrentAmp(&ina_buck);
@@ -172,19 +192,22 @@ int main(void)
       //ina_supp.current = getCurrentAmp(&ina_supp);
       //ina_supp.power   = getPowerWatt(&ina_supp);
 
-      // format in form to be sent over CAN
-      CAN_TxHeaderTypeDef tx_header;
-      tx_header.IDE = CAN_ID_STD;
-      tx_header.StdId = 3; // example ID
-      tx_header.RTR = CAN_RTR_DATA;
-      tx_header.DLC = 8; // Data Length Code, number of bytes to send
-      uint8_t tx_data[8] = {0};
+      // get average adc
+      uint32_t sum = 0;
+      for (uint8_t i = 0; i < supp_mVolts_index; i++) {
+        sum += supp_mVolts_reads[i];
+      }
+      uint32_t avg_mVoltage = sum / supp_mVolts_index;
+      supp_mVolts_index = 0;
 
-      tx_data[0] = 3;
-      tx_data[1] = (mVoltage) & 0xFF;
-      tx_data[2] = (mVoltage >> 8) & 0xFF;
-      tx_data[3] = (mVoltage >> 16) & 0xFF;
-      tx_data[4] = (mVoltage >> 24) & 0xFF;
+      // format in form to be sent over CAN
+      tx_data[1] = (avg_mVoltage) & 0xFF;
+      tx_data[2] = (avg_mVoltage >> 8) & 0xFF;
+      tx_data[3] = (avg_mVoltage >> 16) & 0xFF;
+      tx_data[4] = (avg_mVoltage >> 24) & 0xFF;
+      tx_data[5] = 0;
+      tx_data[6] = 0;
+      tx_data[7] = 0;
 
       // Send CAN message
       uint32_t tx_mailbox;
@@ -427,22 +450,6 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-
-void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
-{
-    CAN_RxHeaderTypeDef rx_header;
-    uint8_t rx_data[8];
-
-    if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header, rx_data) == HAL_OK) {
-        // ✅ Message received — do something with it
-
-        if (rx_header.StdId == 0x123 && rx_header.DLC >= 2) {
-            uint16_t value = rx_data[0] | (rx_data[1] << 8);
-            // Process `value`
-        }
-    }
-}
-
 /* USER CODE END 4 */
 
 /**
