@@ -104,15 +104,33 @@ int main(void)
   MX_ADC1_Init();
   MX_I2C2_Init();
   /* USER CODE BEGIN 2 */
+  CAN_FilterTypeDef filter = {0};
+    filter.FilterActivation = ENABLE;
+    filter.FilterBank = 0;
+    filter.FilterFIFOAssignment = CAN_FILTER_FIFO0;
+    filter.FilterMode = CAN_FILTERMODE_IDMASK;
+    filter.FilterScale = CAN_FILTERSCALE_32BIT;
 
+    // Accept everything for now (good for debugging)
+    filter.FilterIdHigh = 0x0000;
+    filter.FilterIdLow = 0x0000;
+    filter.FilterMaskIdHigh = 0x0000;
+    filter.FilterMaskIdLow = 0x0000;
+
+    HAL_CAN_ConfigFilter(&hcan1, &filter);
   HAL_CAN_Start(&hcan1);
+  HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
+
+
+
 
   if (INA226_Initialize(&ina_buck, INA226_I2C_ADDR_BUCK, &hi2c2, 10, 20) != HAL_OK) {
     Error_Handler();
   }
-  if (INA226_Initialize(&ina_supp, INA226_I2C_ADDR_SUPP, &hi2c2, 10, 20) != HAL_OK) {
-      Error_Handler();
-  }
+  // this is not working for some reason may need to look at solder
+  //if (INA226_Initialize(&ina_supp, INA226_I2C_ADDR_SUPP, &hi2c2, 10, 20) != HAL_OK) {
+  //    Error_Handler();
+  //}
 
   /* USER CODE END 2 */
 
@@ -144,22 +162,21 @@ int main(void)
         adc = HAL_ADC_GetValue(&hadc1);
       }
       HAL_ADC_Stop(&hadc1);
-      float voltage = (float)adc * 3.3f / 4095.0f; // assuming 12-bit ADC and 3.3V reference
+      float voltage = (float)adc * 3.3f / 4095.0f * 6.4f; // * 6.426f is from voltage divider/tolerance stuff idk its just guestimated to be right if that makes sense
       uint32_t mVoltage = (uint32_t)(voltage * 1000); // convert to mV
 
       // read i2c
       ina_buck.current = getCurrentAmp(&ina_buck);
       ina_buck.power   = getPowerWatt(&ina_buck);
 
-      ina_supp.current = getCurrentAmp(&ina_supp);
-      ina_supp.power   = getPowerWatt(&ina_supp);
+      //ina_supp.current = getCurrentAmp(&ina_supp);
+      //ina_supp.power   = getPowerWatt(&ina_supp);
 
       // format in form to be sent over CAN
       CAN_TxHeaderTypeDef tx_header;
-      tx_header.StdId = 3; // example ID
-      tx_header.ExtId = 0x00;
-      tx_header.RTR = CAN_RTR_DATA;
       tx_header.IDE = CAN_ID_STD;
+      tx_header.StdId = 3; // example ID
+      tx_header.RTR = CAN_RTR_DATA;
       tx_header.DLC = 8; // Data Length Code, number of bytes to send
       uint8_t tx_data[8] = {0};
 
@@ -410,6 +427,21 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
+{
+    CAN_RxHeaderTypeDef rx_header;
+    uint8_t rx_data[8];
+
+    if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header, rx_data) == HAL_OK) {
+        // ✅ Message received — do something with it
+
+        if (rx_header.StdId == 0x123 && rx_header.DLC >= 2) {
+            uint16_t value = rx_data[0] | (rx_data[1] << 8);
+            // Process `value`
+        }
+    }
+}
 
 /* USER CODE END 4 */
 
